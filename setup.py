@@ -17,10 +17,14 @@ def main():
     # Install 'uv' in the current python environment to manage everything quickly
     print_step("Ensuring 'uv' package manager is installed...")
     try:
-        subprocess.run([sys.executable, "-m", "pip", "install", "-U", "uv"], check=True)
+        subprocess.run([sys.executable, "-m", "pip", "install", "-U", "uv", "--quiet"], check=True)
     except subprocess.CalledProcessError:
-        print("❌ Error: Failed to install 'uv'. Please ensure you have internet access and pip works.")
-        sys.exit(1)
+        try:
+            # Fallback for PEP 668 externally-managed environments (macOS Homebrew, Ubuntu APT)
+            subprocess.run([sys.executable, "-m", "pip", "install", "-U", "uv", "--break-system-packages", "--quiet"], check=True)
+        except subprocess.CalledProcessError:
+            print("❌ Error: Failed to install 'uv'. Please ensure you have internet access and pip works.")
+            sys.exit(1)
 
     venv_dir = Path("venv")
 

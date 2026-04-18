@@ -82,39 +82,57 @@ If your machine does not already have Python installed, you must install the bar
 
 ### 2.1. Setup J.A.R.V.I.S for Windows
 
-```bash
-# Clone the repository
-git clone https://github.com/rahmonovme/J.A.R.V.I.S.git
-cd J.A.R.V.I.S
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/rahmonovme/J.A.R.V.I.S.git
+   ```
 
-# Run the automated setup script
-# (Automatically downloads Python 3.12 via uv if needed, creates a venv, and installs dependencies)
-python setup.py
+2. **Enter the directory:**
+   ```bash
+   cd J.A.R.V.I.S
+   ```
 
-# Activate the virtual environment (PowerShell)
-.\venv\Scripts\Activate.ps1
+3. **Run the automated setup script:** *(This automatically downloads Python 3.12 via uv if needed, creates a venv, and installs dependencies)*
+   ```bash
+   python setup.py
+   ```
 
-# Run JARVIS
-python main.py
-```
+4. **Activate the virtual environment (PowerShell):**
+   ```bash
+   .\venv\Scripts\Activate.ps1
+   ```
+
+5. **Run JARVIS:**
+   ```bash
+   python main.py
+   ```
 
 ### 2.2. Setup J.A.R.V.I.S for Mac/Linux
 
-```bash
-# Clone the repository
-git clone https://github.com/rahmonovme/J.A.R.V.I.S.git
-cd J.A.R.V.I.S
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/rahmonovme/J.A.R.V.I.S.git
+   ```
 
-# Run the automated setup script
-# (Automatically downloads Python 3.12 via uv if needed, creates a venv, and installs dependencies)
-python3 setup.py
+2. **Enter the directory:**
+   ```bash
+   cd J.A.R.V.I.S
+   ```
 
-# Activate the virtual environment
-source venv/bin/activate
+3. **Run the automated setup script:** *(This automatically downloads Python 3.12 via uv if needed, creates a venv, and installs dependencies)*
+   ```bash
+   python3 setup.py
+   ```
 
-# Run JARVIS
-python3 main.py
-```
+4. **Activate the virtual environment:**
+   ```bash
+   source venv/bin/activate
+   ```
+
+5. **Run JARVIS:**
+   ```bash
+   python3 main.py
+   ```
 
 On first launch, a setup wizard will prompt you for your Gemini API key.
 

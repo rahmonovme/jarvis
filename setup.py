@@ -54,7 +54,7 @@ def main():
         sys.exit(1)
 
     print_step("Installing dependencies from requirements.txt using uv...")
-    subprocess.run([venv_python, "-m", "uv", "pip", "install", "-r", "requirements.txt"], check=True, env=uv_env)
+    subprocess.run([sys.executable, "-m", "uv", "pip", "install", "--python", venv_python, "-r", "requirements.txt"], check=True, env=uv_env)
 
     print_step("Installing Playwright browsers...")
     subprocess.run([venv_python, "-m", "playwright", "install"], check=True)

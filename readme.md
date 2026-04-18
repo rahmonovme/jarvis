@@ -54,12 +54,33 @@ An advanced AI personal assistant powered by Google Gemini Live API with real-ti
 
 ## 🛠️ Installation
 
-### Prerequisites
-- Python 3.10+
-- Windows / macOS / Linux
-- Gemini API key
+### 1. Install Python (If you don't have it)
 
-### Setup
+If your machine does not already have Python installed, you must install the bare minimum system Python to run the automated setup script.
+
+**🍎 For macOS:**
+1. Open Terminal and install [Homebrew](https://brew.sh/) (if you don't have it):
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+2. Install Python 3:
+   ```bash
+   brew install python3
+   ```
+
+**🪟 For Windows:**
+1. Download the official installer from [python.org](https://www.python.org/downloads/).
+2. **CRITICAL**: When running the installer, you **must** check the box at the very bottom that says **"Add python.exe to PATH"** before clicking Install.
+
+**🐧 For Linux (Ubuntu/Debian):**
+1. Open Terminal and run:
+   ```bash
+   sudo apt update && sudo apt install python3 python3-pip python3-venv
+   ```
+
+---
+
+### 2. Setup J.A.R.V.I.S
 
 ```bash
 # Clone the repository

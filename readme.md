@@ -80,30 +80,39 @@ If your machine does not already have Python installed, you must install the bar
 
 ---
 
-### 2. Setup J.A.R.V.I.S
+### 2.1. Setup J.A.R.V.I.S for Windows
 
 ```bash
 # Clone the repository
 git clone https://github.com/rahmonovme/J.A.R.V.I.S.git
 cd J.A.R.V.I.S
 
-# Run the automated cross-platform setup script
+# Run the automated setup script
 # (Automatically downloads Python 3.12 via uv if needed, creates a venv, and installs dependencies)
-# 🪟 Windows:
 python setup.py
-# 🍎 Mac/🐧 Linux:
+
+# Activate the virtual environment (PowerShell)
+.\venv\Scripts\Activate.ps1
+
+# Run JARVIS
+python main.py
+```
+
+### 2.2. Setup J.A.R.V.I.S for Mac/Linux
+
+```bash
+# Clone the repository
+git clone https://github.com/rahmonovme/J.A.R.V.I.S.git
+cd J.A.R.V.I.S
+
+# Run the automated setup script
+# (Automatically downloads Python 3.12 via uv if needed, creates a venv, and installs dependencies)
 python3 setup.py
 
 # Activate the virtual environment
-# 🪟 Windows (PowerShell):
-.\venv\Scripts\Activate.ps1
-# 🍎 Mac/🐧 Linux:
 source venv/bin/activate
 
 # Run JARVIS
-# 🪟 Windows:
-python main.py
-# 🍎 Mac/🐧 Linux:
 python3 main.py
 ```
 

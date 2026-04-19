@@ -97,6 +97,16 @@ window._onSetupOk = function() {
   setTimeout(() => el.style.display = "none", 500);
 };
 
+/* ═══════ DYNAMIC OS LABELING ═══════ */
+let osName = "System";
+if (navigator.userAgent.indexOf("Win") !== -1) osName = "Windows";
+if (navigator.userAgent.indexOf("Mac") !== -1) osName = "MacBook";
+if (navigator.userAgent.indexOf("Linux") !== -1) osName = "Linux";
+const autostartLabel = document.getElementById("autostart-label");
+if (autostartLabel) {
+    autostartLabel.innerText = `Auto-start with ${osName}`;
+}
+
 /* ═══════ RESIZE ═══════ */
 function resize() {
   const dpr = window.devicePixelRatio || 1;

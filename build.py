@@ -14,13 +14,15 @@ Output:
 import subprocess
 import sys
 import shutil
+import os
 from pathlib import Path
-
 BASE = Path(__file__).resolve().parent
 
 def build():
+    import platform
+    exe_name = "JARVIS.exe" if platform.system() == "Windows" else "JARVIS"
     print("=" * 50)
-    print("  Building JARVIS.exe")
+    print(f"  Building {exe_name}")
     print("=" * 50)
 
     cmd = [
@@ -28,12 +30,12 @@ def build():
         "--onefile",
         "--name", "JARVIS",
         "--noconsole",                        # No terminal window
-        "--add-data", f"static{os.sep}*;static",   # Bundle web UI
-        "--add-data", f"core{os.sep}*;core",        # Bundle prompts
-        "--add-data", f"config{os.sep}*;config",    # Bundle config (if any)
-        "--add-data", f"memory{os.sep}*;memory",
-        "--add-data", f"actions{os.sep}*;actions",
-        "--add-data", f"agent{os.sep}*;agent",
+        "--add-data", f"static{os.sep}*{os.pathsep}static",   # Bundle web UI
+        "--add-data", f"core{os.sep}*{os.pathsep}core",        # Bundle prompts
+        "--add-data", f"config{os.sep}*{os.pathsep}config",    # Bundle config (if any)
+        "--add-data", f"memory{os.sep}*{os.pathsep}memory",
+        "--add-data", f"actions{os.sep}*{os.pathsep}actions",
+        "--add-data", f"agent{os.sep}*{os.pathsep}agent",
         "--hidden-import", "aiohttp",
         "--hidden-import", "webview",
         "--hidden-import", "pyaudio",

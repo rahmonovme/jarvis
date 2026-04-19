@@ -31,6 +31,15 @@ try:
     pyautogui.FAILSAFE = True
     pyautogui.PAUSE    = 0.05
     _PYAUTOGUI = True
+    
+    # CRITICAL: Force Python to be DPI Aware. 
+    # Prevents Windows from silently scaling raw MSS coordinates (e.g. 2500x) down into primary monitor arrays!
+    if platform.system() == "Windows":
+        import ctypes
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except:
+            pass
 except ImportError:
     _PYAUTOGUI = False
 
@@ -354,26 +363,38 @@ def _analyze_screen_for_element(description: str) -> tuple[int, int] | None:
         import mss
         import mss.tools
 
-        # Capture all monitors combined
+        # Try to lock precision screenshot bounds to Active Window to prevent multi-monitor DPI scaling squashing
+        focus_bounds = None
+        if platform.system() == "Windows":
+            try:
+                import win32gui
+                hwnd = win32gui.GetForegroundWindow()
+                if hwnd:
+                    l, t, r, b = win32gui.GetWindowRect(hwnd)
+                    if (r - l) > 150 and (b - t) > 150: # Sanity check bounds
+                        focus_bounds = {"left": l, "top": t, "width": r - l, "height": b - t}
+            except Exception:
+                pass
+
         with mss.mss() as sct:
-            monitors = sct.monitors
-            shot = sct.grab(monitors[0])  # 0 = all monitors combined
+            if focus_bounds:
+                shot = sct.grab(focus_bounds)
+                base_left, base_top = focus_bounds["left"], focus_bounds["top"]
+            else:
+                monitors = sct.monitors
+                shot = sct.grab(monitors[0])  
+                base_left, base_top = monitors[0]["left"], monitors[0]["top"]
+                
             png_bytes = mss.tools.to_png(shot.rgb, shot.size)
             total_w, total_h = shot.width, shot.height
 
         # Build monitor info string
-        monitor_info = f"Total resolution: {total_w}x{total_h}. "
-        if len(monitors) > 2:  # monitors[0] is combined, 1+ are individual
-            monitor_info += f"{len(monitors) - 1} monitors: "
-            for i, m in enumerate(monitors[1:], 1):
-                monitor_info += (
-                    f"Monitor {i} at ({m['left']},{m['top']}) "
-                    f"{m['width']}x{m['height']}. ")
+        monitor_info = f"Image resolution: {total_w}x{total_h} pixels."
 
         prompt = (
-            f"This is a screenshot of a computer screen. {monitor_info}"
-            f"Find the element: '{description}'. "
-            f"Return ONLY: x,y (the ABSOLUTE center coordinates). "
+            f"This is a screenshot of a computer screen. {monitor_info}\n"
+            f"Find the element: '{description}'.\n"
+            f"Return ONLY the exact pixel coordinates: x,y (relative strictly to the top-left of this entire image, where top-left is 0,0).\n"
             f"If not found, return: NOT_FOUND"
         )
 
@@ -389,7 +410,11 @@ def _analyze_screen_for_element(description: str) -> tuple[int, int] | None:
         import re
         match = re.search(r"(\d+)\s*,\s*(\d+)", text)
         if match:
-            return int(match.group(1)), int(match.group(2))
+            img_x = int(match.group(1))
+            img_y = int(match.group(2))
+            os_x = img_x + base_left
+            os_y = img_y + base_top
+            return os_x, os_y
 
     except Exception as e:
         print(f"[ComputerControl] ⚠️ Screen analysis failed: {e}")

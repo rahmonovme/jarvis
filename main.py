@@ -20,9 +20,24 @@ import struct
 import json
 import re
 import sys
-_stdout_encoding = getattr(sys.stdout, 'encoding', None)
-if _stdout_encoding and hasattr(sys.stdout, 'reconfigure') and _stdout_encoding.lower() != 'utf-8':
-    sys.stdout.reconfigure(encoding='utf-8')
+
+class _DummyWriter:
+    def write(self, *args, **kwargs): pass
+    def flush(self): pass
+    def reconfigure(self, *args, **kwargs): pass
+
+try:
+    print("", end="")
+    _stdout_encoding = getattr(sys.stdout, 'encoding', None)
+    if _stdout_encoding and hasattr(sys.stdout, 'reconfigure') and _stdout_encoding.lower() != 'utf-8':
+        sys.stdout.reconfigure(encoding='utf-8')
+except Exception:
+    sys.stdout = _DummyWriter()
+
+try:
+    print("", file=sys.stderr, end="")
+except Exception:
+    sys.stderr = _DummyWriter()
 import traceback
 from pathlib import Path
 import urllib.request
@@ -43,7 +58,7 @@ import pyaudio
 from google import genai
 from google.genai import types
 import time 
-from ui import JarvisUI
+from ui_web import JarvisUI
 from memory.memory_manager import load_memory, update_memory, format_memory_for_prompt
 
 from agent.task_queue import get_queue
@@ -65,14 +80,22 @@ from actions.dev_agent        import dev_agent
 from actions.web_search       import web_search as web_search_action
 from actions.computer_control import computer_control
 
-def get_base_dir():
+def get_bundle_dir():
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent
+
+def get_user_dir():
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent
 
-BASE_DIR        = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
-PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
+BUNDLE_DIR      = get_bundle_dir()
+USER_DIR        = get_user_dir()
+BASE_DIR        = Path(__file__).resolve().parent
+
+API_CONFIG_PATH = USER_DIR / "config" / "api_keys.json"
+PROMPT_PATH     = BUNDLE_DIR / "core" / "prompt.txt"
 LIVE_MODEL          = "models/gemini-2.5-flash-native-audio-preview-12-2025"
 FORMAT              = pyaudio.paInt16
 CHANNELS            = 1
@@ -745,17 +768,21 @@ class JarvisLive:
             input=True,
             frames_per_buffer=CHUNK_SIZE,
         )
+        silence_frames = 0
         try:
             while True:
                 data = await asyncio.to_thread(
                     stream.read, CHUNK_SIZE, exception_on_overflow=False
                 )
-                # Echo cancellation: send silence when JARVIS is speaking
-                if self._mic_muted:
+                
+                rms = 0.0
+                
+                # Echo cancellation: target silence when JARVIS is speaking
+                if self._mic_muted or getattr(self.ui, 'is_building', False):
                     data = b'\x00' * len(data)
                     self.ui.mic_level = 0.0
                 else:
-                    # Calculate mic level for UI visualizer
+                    # Calculate mic level for UI visualizer and noise gating
                     try:
                         n = len(data) // 2
                         if n > 0:
@@ -764,7 +791,17 @@ class JarvisLive:
                             self.ui.mic_level = min(1.0, rms * 5.0)
                     except Exception:
                         pass
-                await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
+                
+                if rms < 0.005:
+                    silence_frames += 1
+                else:
+                    silence_frames = 0
+                    
+                # Explicit Noise Gate: Block stream routing on absolute silence (>0.9s trailing window)
+                # Radically prevents Gemini's internal buffer VAD algorithms from filling up with dead space
+                if silence_frames < 15:
+                    await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
+
         except Exception as e:
             print(f"[JARVIS] ❌ Mic error: {e}")
             raise
@@ -904,6 +941,7 @@ class JarvisLive:
                     backoff = 3
                     consecutive_failures = 0
                     self.ui.conn_state = "ONLINE"
+                    self.ui.status_text = "ONLINE"
                     print("[JARVIS] ✅ Connected.")
                     self.ui.write_log("SYS: JARVIS online.")
 
@@ -949,7 +987,7 @@ def main():
             print("\n🔴 Shutting down...")
 
     threading.Thread(target=runner, daemon=True).start()
-    ui.root.mainloop()
+    ui.mainloop()
 
 if __name__ == "__main__":
     main()

@@ -20,9 +20,10 @@ An advanced AI personal assistant powered by Google Gemini Live API with real-ti
 - Multi-monitor awareness for screen analysis and interaction
 - Cross-platform support for Windows, macOS, and Linux out of the box.
 
-### 🖥️ Premium HUD Interface
-- Arc-Reactor inspired JARVIS voice visualizer (cyan, circular)
-- Frequency-bar circle microphone visualizer (amber)
+### 🖥️ Premium Web-Native HUD Interface
+- High-performance glassmorphism UI rendered via WebViews (Flask backend).
+- Arc-Reactor inspired JARVIS voice visualizer (cyan, circular).
+- Frequency-bar circle microphone visualizer (amber).
 - **Connection status indicators** — center animation changes color:
   - 🟦 **Cyan** = Online
   - 🟡 **Amber** = Connecting
@@ -32,18 +33,18 @@ An advanced AI personal assistant powered by Google Gemini Live API with real-ti
 - Corner HUD data readouts (uptime, system status)
 - Real-time clock display
 
-### ⚙️ Settings & Configuration
-- **Close JARVIS** button — cleanly terminates all processes
+### ⚙️ Desktop Deployment & Settings
+- **Compiled Binary Support** — Full support for headless execution and `.exe` auto-boot pipelines.
 - **Settings modal** with:
   - API key management (view/hide/edit/save)
   - Auto-start with system boot toggle
-- First-launch API key setup wizard
+- First-launch API key setup wizard.
 
-### 🔧 Connection Stability
-- Exponential backoff on connection failures (3s → 60s cap)
-- Connection state tracking exposed to UI
-- Automatic reconnection with failure counting
-- Graceful handling of WebSocket errors
+### 🧠 Advanced Quota & Error Management
+- **Intelligent API Fallback** — Instant failsafe routing across parallel Google Quota limits to prevent daily exhaustion.
+- **Local Tracker Cache** — Permanently skips exhausted endpoints using physical local JSON tracking.
+- Exponential backoff on connection failures (3s → 60s cap).
+- Graceful handling of WebSocket keep-alive network errors.
 
 ### 📱 Smart Messaging
 - WhatsApp, Telegram, Instagram direct messaging
@@ -143,12 +144,18 @@ On first launch, a setup wizard will prompt you for your Gemini API key.
 ```text
 J.A.R.V.I.S/
 ├── main.py                  # Entry point, audio streaming, Live API connection
-├── ui.py                    # Premium HUD interface (tkinter canvas)
+├── ui_web.py                # Premium Web-based HUD interface (Flask backend)
+├── build.py                 # PyInstaller executable compiler for distribution
 ├── setup.py                 # Automated cross-platform environment bootstrapper
+├── static/                  # Web HUD frontend assets
+│   ├── index.html           # HUD Layout and canvas boundaries
+│   ├── app.js               # Frontend voice visualizer and WebSocket interface
+│   └── style.css            # Premium animated aesthetics and transitions
 ├── config/
-│   └── api_keys.json        # API key storage (created on first run)
+│   ├── api_keys.json        # API key storage (created on first run)
+│   └── api_limits.json      # Intelligent daily quota limits tracker
 ├── core/
-│   ├── gemini_client.py     # Gemini API client wrapper
+│   ├── gemini_client.py     # Gemini client with cascading bucket fallback mechanisms
 │   └── prompt.txt           # System prompt for JARVIS personality
 ├── memory/
 │   ├── memory_manager.py    # Session & persistent memory tracking
@@ -156,25 +163,14 @@ J.A.R.V.I.S/
 ├── agent/
 │   ├── executor.py          # Multi-step task executor
 │   ├── planner.py           # Gemini-powered task planner
-│   ├── error_handler.py     # Error recovery with auto-replanning
-│   └── task_queue.py        # Background task queue
-├── actions/
-│   ├── open_app.py          # Smart multi-strategy app launcher
-│   ├── browser_control.py   # Playwright browser automation
-│   ├── computer_control.py  # Mouse/keyboard/screen control
-│   ├── computer_settings.py # System settings (volume, brightness, etc.)
-│   ├── screen_processor.py  # Multi-monitor screen analysis
-│   ├── send_message.py      # WhatsApp/Telegram/Instagram messaging
-│   ├── web_search.py        # Web search via DuckDuckGo
-│   ├── file_controller.py   # File operations
-│   ├── cmd_control.py       # Command-line execution
-│   ├── code_helper.py       # Code writing/running
-│   ├── dev_agent.py         # Development assistant
-│   ├── youtube_video.py     # YouTube playback/summarization
-│   ├── weather_report.py    # Weather reports
-│   ├── flight_finder.py     # Flight search
-│   ├── reminder.py          # Reminders
-│   └── desktop.py           # Desktop management
+│   ├── task_queue.py        # Background task queue
+│   └── error_handler.py     # Error recovery with auto-replanning
+└── actions/                 # Modular autonomous tools
+    ├── computer_control.py  # High-precision Active-Window coordinate tracking
+    ├── screen_processor.py  # Visual analysis engine
+    ├── open_app.py          # Smart multi-strategy native launcher
+    ├── web_search.py        # Web search integration
+    └── ...                  # Other autonomous tools
 ```
 
 ---

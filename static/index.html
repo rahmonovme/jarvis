@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>J.A.R.V.I.S</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div id="app">
+  <canvas id="bg-canvas"></canvas>
+
+  <!-- ═══ HEADER ═══ -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">
+        <svg class="logo-icon" viewBox="0 0 24 24">
+          <path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z"/>
+          <line x1="10" y1="22" x2="14" y2="22"/>
+          <line x1="9" y1="9" x2="12" y2="12"/>
+          <line x1="15" y1="9" x2="12" y2="12"/>
+          <line x1="12" y1="12" x2="12" y2="16"/>
+        </svg>
+        <span class="logo-text">J.A.R.V.I.S</span>
+      </div>
+    </div>
+    <div class="header-center">
+      <div class="logo-sub">INTELLIGENT SYSTEM</div>
+    </div>
+    <div class="header-right">
+      <span class="header-clock" id="clock">00:00:00</span>
+      <button class="hdr-btn" id="btn-settings" title="Settings">
+        <svg viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══ MAIN ═══ -->
+  <main class="main-content">
+    <div class="hud tl">SYS://NEURAL-CORE</div>
+    <div class="hud tr" id="hud-uptime">UPTIME 00:00:00</div>
+    <div class="hud bl" id="hud-bl">◆ CORE ACTIVE</div>
+    <div class="hud br">◆ STREAM LIVE</div>
+
+    <!-- AI Core Orb (also reacts to JARVIS voice) -->
+    <canvas id="core-canvas"></canvas>
+
+    <!-- Status -->
+    <div class="status-bar">
+      <span class="status-text">
+        <span class="status-dot connecting" id="status-dot"></span>
+        <span id="status-label">INITIALISING</span>
+      </span>
+    </div>
+
+    <!-- Mic Waveform (horizontal bar) -->
+    <div class="mic-section">
+      <canvas id="mic-wave" class="mic-wave-canvas"></canvas>
+      <div class="mic-label-row">
+        <svg class="mic-icon" id="mic-icon" viewBox="0 0 24 24" stroke="rgba(6,182,212,0.4)">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+        <span class="mic-label" id="mic-label">USER MIC</span>
+        <span class="mic-status" id="mic-status">STANDBY</span>
+      </div>
+    </div>
+
+    <!-- Log -->
+    <div class="log-panel">
+      <div class="log-header">
+        <svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        <span class="log-header-text">SYSTEM LOG</span>
+      </div>
+      <div class="log-content" id="log-content"></div>
+    </div>
+  </main>
+
+  <!-- ═══ FOOTER ═══ -->
+  <footer class="footer">
+    <span class="footer-text">RAHMONOV.ME · CLASSIFIED · J.A.R.V.I.S</span>
+  </footer>
+
+  <!-- ═══ SETTINGS MODAL ═══ -->
+  <div class="modal-overlay" id="modal-settings">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          SETTINGS
+        </span>
+        <button class="modal-close" id="modal-close-settings">
+          <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-section">
+          <div class="modal-section-title">
+            <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            API CONFIGURATION
+          </div>
+          <label class="field-label">GEMINI API KEY</label>
+          <div class="input-group">
+            <input type="password" class="input-field" id="api-key-input" placeholder="Enter API key..." />
+            <button class="btn" id="btn-toggle-vis" title="Toggle visibility">
+              <svg viewBox="0 0 24 24" id="eye-icon"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+          <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
+            <button class="btn" id="btn-save-key">
+              <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              SAVE
+            </button>
+            <span class="status-msg" id="key-status"></span>
+          </div>
+        </div>
+        <div class="modal-section">
+          <div class="modal-section-title">
+            <svg viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+            STARTUP
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Auto-start with Windows</span>
+            <button class="btn btn-toggle off" id="btn-autostart">
+              <svg viewBox="0 0 24 24" width="14" height="14" style="stroke:currentColor;stroke-width:2;fill:none"><circle cx="12" cy="12" r="10"/></svg>
+              OFF
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="btn-close-settings" style="width:100%;justify-content:center;">CLOSE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ SETUP ═══ -->
+  <div class="setup-overlay" id="setup-screen" style="display:none">
+    <div class="setup-card">
+      <div class="setup-orb"></div>
+      <div class="setup-title">INITIALISATION</div>
+      <div class="setup-desc">Enter your Gemini API key to boot J.A.R.V.I.S.</div>
+      <input type="password" class="setup-input" id="setup-api-key" placeholder="Gemini API Key..." />
+      <button class="setup-btn" id="setup-btn">INITIALISE</button>
+    </div>
+  </div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

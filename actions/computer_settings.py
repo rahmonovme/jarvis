@@ -72,15 +72,9 @@ def volume_set(value: int):
     value = max(0, min(100, value))
     if _OS == "Windows":
         try:
-            from ctypes import cast, POINTER
-            from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-            import math
-            devices   = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            vol       = cast(interface, POINTER(IAudioEndpointVolume))
-            vol_db    = -65.25 if value == 0 else max(-65.25, 20 * math.log10(value / 100))
-            vol.SetMasterVolumeLevel(vol_db, None)
+            from pycaw.pycaw import AudioUtilities
+            devices = AudioUtilities.GetSpeakers()
+            devices.EndpointVolume.SetMasterVolumeLevelScalar(value / 100, None)
             print(f"[Settings] 🔊 Volume → {value}%")
             return
         except Exception as e:
@@ -367,6 +361,13 @@ def toggle_wifi():
     else:
         subprocess.run(["nmcli", "radio", "wifi"])
 
+_pending_dangerous_action = None
+_pending_dangerous_time = 0
+
+def quit_jarvis():
+    import os
+    os._exit(0)
+
 ACTION_MAP = {
     "volume_up":               volume_up,
     "volume_down":             volume_down,
@@ -504,6 +505,9 @@ ACTION_MAP = {
     "escape":                  press_escape,
     "press_escape":            press_escape,
     "cancel":                  press_escape,
+    "close_jarvis":            quit_jarvis,
+    "quit_jarvis":             quit_jarvis,
+    "exit_jarvis":             quit_jarvis,
 }
 
 def _detect_action(description: str) -> dict:
@@ -576,6 +580,14 @@ Examples:
 - "press f5" → {{"action": "press_key", "value": "f5"}}
 - "enter'a bas" → {{"action": "enter", "value": null}}
 - "escape'e bas" → {{"action": "escape", "value": null}}
+- "close yourself" → {{"action": "close_jarvis", "value": null}}
+- "close jarvis" → {{"action": "close_jarvis", "value": null}}
+- "close the app" → {{"action": "close_app", "value": null}}
+- "close" → {{"action": "close_app", "value": null}} (NEVER map 'close' to shutdown/restart/lock)
+- "yes" → {{"action": "confirm", "value": null}}
+- "confirm" → {{"action": "confirm", "value": null}}
+- "no" → {{"action": "cancel", "value": null}}
+- "cancel" → {{"action": "cancel", "value": null}}
 
 IMPORTANT:
 - Always return one of the available actions listed above.
@@ -665,9 +677,46 @@ def computer_settings(
         except Exception as e:
             return f"Scroll failed: {e}"
 
+    global _pending_dangerous_action, _pending_dangerous_time
+
+    if action in ("confirm", "yes", "do_it"):
+        if _pending_dangerous_action and (time.time() - _pending_dangerous_time) < 30:
+            func = _pending_dangerous_action
+            _pending_dangerous_action = None
+            _pending_dangerous_time = 0
+            try:
+                func()
+                return "Confirmed and executed."
+            except Exception as e:
+                return f"Action failed: {e}"
+        else:
+            return "There is nothing pending to confirm."
+
+    if action in ("cancel", "no"):
+        if _pending_dangerous_action:
+            _pending_dangerous_action = None
+            return "Action cancelled."
+        # If nothing pending, fallthrough is fine
+
     func = ACTION_MAP.get(action)
     if not func:
+        if action in ("confirm", "yes", "do_it", "cancel", "no"):
+            return "Received."
         return f"Unknown action: '{raw_action}', sir."
+
+    dangerous_funcs = [shutdown_computer, restart_computer, lock_screen]
+    if func in dangerous_funcs:
+        if _pending_dangerous_action == func and (time.time() - _pending_dangerous_time) < 30:
+            _pending_dangerous_action = None
+            _pending_dangerous_time = 0
+            # run normally below
+        else:
+            _pending_dangerous_action = func
+            _pending_dangerous_time = time.time()
+            action_name = "shutdown"
+            if func == restart_computer: action_name = "restart"
+            elif func == lock_screen: action_name = "lock"
+            return f"WARNING: {action_name.capitalize()} requested. Please confirm by saying 'yes' or 'confirm'. Or say 'no' to cancel."
 
     try:
         func()

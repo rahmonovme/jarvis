@@ -24,6 +24,26 @@ import pyaudio
 from pathlib import Path
 
 try:
+    import websockets.asyncio.client as _ws_client
+except ImportError:
+    try:
+        import websockets.client as _ws_client
+    except ImportError:
+        import websockets as _ws_client
+
+_orig_ws_connect = _ws_client.connect
+def _patched_ws_connect(*args, **kwargs):
+    if 'open_timeout' not in kwargs:
+        kwargs['open_timeout'] = 60
+    if 'ping_interval' not in kwargs:
+        kwargs['ping_interval'] = 15
+    if 'ping_timeout' not in kwargs:
+        kwargs['ping_timeout'] = 10
+    return _orig_ws_connect(*args, **kwargs)
+_ws_client.connect = _patched_ws_connect
+
+
+try:
     import PIL.Image
     _PIL_OK = True
 except ImportError:

@@ -34,14 +34,17 @@ def main():
     uv_env = os.environ.copy()
     uv_env["UV_NO_CACHE"] = "1"
 
-    # Check available Python version
-    if sys.version_info < (3, 11):
-        print_step("Python version is older than 3.11. Creating venv with a new Python 3.12 via uv...")
-        # 'uv' will automatically download and install Python 3.12 if it's not present on the system
-        subprocess.run([sys.executable, "-m", "uv", "venv", "--python", "3.12", "venv"], check=True, env=uv_env)
+    if venv_dir.exists() and venv_dir.is_dir():
+        print_step("Virtual environment already exists. Skipping creation...")
     else:
-        print_step(f"Python {sys.version_info.major}.{sys.version_info.minor} detected. Creating virtual environment...")
-        subprocess.run([sys.executable, "-m", "uv", "venv", "venv"], check=True, env=uv_env)
+        # Check available Python version
+        if sys.version_info < (3, 11):
+            print_step("Python version is older than 3.11. Creating venv with a new Python 3.12 via uv...")
+            # 'uv' will automatically download and install Python 3.12 if it's not present on the system
+            subprocess.run([sys.executable, "-m", "uv", "venv", "--python", "3.12", "venv"], check=True, env=uv_env)
+        else:
+            print_step(f"Python {sys.version_info.major}.{sys.version_info.minor} detected. Creating virtual environment...")
+            subprocess.run([sys.executable, "-m", "uv", "venv", "venv"], check=True, env=uv_env)
 
     # Determine the venv python executable path cross-platform
     if os.name == 'nt':

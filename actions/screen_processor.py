@@ -351,7 +351,12 @@ class _LiveSession:
                     self._player.speaking = True
                     self._player.status_text = "RESPONDING"
                     self._player.last_audio_played_time = time.time()
-                await asyncio.to_thread(stream.write, chunk)
+                
+                if self._player and getattr(self._player, 'mobile_connected', False):
+                    self._player.mobile_out_queue.put_nowait(chunk)
+                else:
+                    if not self._player or not getattr(self._player, 'mobile_locked', False):
+                        await asyncio.to_thread(stream.write, chunk)
         finally:
             stream.close()
             if self._player:

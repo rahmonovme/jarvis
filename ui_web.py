@@ -217,7 +217,16 @@ class JarvisUI:
 
         # Sleep / Wake
         self._sleep_event    = threading.Event()   # Set when sleeping
-        self._wake_callback  = None                # Called by wake_up() to signal main.py
+        self._woken_event    = None                # Set by main.py, signaled on wake
+
+        # Mobile Device connection tracking
+        self.mobile_connected = False
+        self.mobile_locked = False
+        self._mobile_ip = None
+        self.mobile_mic_queue = None
+        self.mobile_out_queue = None
+        self._desktop_ws = None
+        self._mobile_ws = None
 
         # aiohttp server (for serving static files + WS fallback)
         self._ws_clients: list = []
@@ -281,9 +290,8 @@ class JarvisUI:
         safe_id   = json.dumps(entry_id)
         self._eval_js(f"_onLog({safe_text},{safe_tag},{safe_id})")
 
-        # WS fallback (browser mode only — when pywebview window doesn't exist)
-        if self._window is None:
-            self._broadcast({"type": "log", **entry})
+        # Broadcast to all connected WebSockets (including mobile)
+        self._broadcast({"type": "log", **entry})
 
         # Status is now driven exclusively by the audio pipeline
         # (speaking flag, _is_executing_tool, _play_audio timeout).
@@ -315,6 +323,7 @@ class JarvisUI:
         self.speaking    = False
         self.mic_level   = 0.0
         self.jarvis_level = 0.0
+        self.mobile_locked = False
         self.write_log("SYS: Entering sleep mode. Say 'wake up' to resume.")
         print("[STATE] 😴 Entering SLEEP mode")
 
@@ -325,30 +334,31 @@ class JarvisUI:
             except Exception as e:
                 print(f"[UI] ⚠️ Minimize failed: {e}")
 
-    def wake_up(self):
+    def wake_up(self, manual_restore=False):
         """Wake JARVIS — restore window, signal main.py to reconnect."""
+        if not self.is_sleeping:
+            return  # Prevent double-waking
+
         self._sleep_event.clear()
         self.status_text = "CONNECTING"
         self.conn_state  = "CONNECTING"
         self.write_log("SYS: Wake word detected. Reconnecting...")
-        print("[STATE] ☀️ WAKING UP")
+        print(f"[STATE] ☀️ WAKING UP (Manual Restore: {manual_restore})")
 
-        # Restore window
-        if self._window:
-            try:
-                self._window.restore()
-                self._window.on_top = True
-                time.sleep(0.3)
-                self._window.on_top = False
-            except Exception as e:
-                print(f"[UI] ⚠️ Restore failed: {e}")
+        # Restore window on a separate thread to avoid deadlocking pywebview
+        if not manual_restore:
+            def _do_restore():
+                try:
+                    if self._window:
+                        self._window.restore()
+                except Exception as e:
+                    print(f"[UI] ⚠️ Restore failed: {e}")
 
-        # Notify JS
-        self._eval_js("_onWakeUp()")
+            threading.Thread(target=_do_restore, daemon=True).start()
 
-        # Trigger reconnect callback in main.py
-        if self._wake_callback:
-            self._wake_callback()
+        # Signal the sleep gate in main.py to unblock
+        if self._woken_event:
+            self._woken_event.set()
 
     @property
     def is_sleeping(self) -> bool:
@@ -391,6 +401,7 @@ class JarvisUI:
                     "conn_state":   self.conn_state,
                     "status_text":  self.status_text,
                     "is_building":  self.is_building,
+                    "mobile_connected": self.mobile_connected,
                 })
                 self._eval_js(f"_onState({state})")
                 time.sleep(1 / 30)
@@ -403,17 +414,137 @@ class JarvisUI:
         asyncio.set_event_loop(self._loop)
         self._loop.run_until_complete(self._serve())
 
+    def _generate_ssl_context(self):
+        try:
+            import ssl
+            import datetime
+            from cryptography import x509
+            from cryptography.x509.oid import NameOID
+            from cryptography.hazmat.primitives import hashes
+            from cryptography.hazmat.primitives.asymmetric import rsa
+            from cryptography.hazmat.primitives import serialization
+
+            cert_path = CONFIG_DIR / "cert.pem"
+            key_path = CONFIG_DIR / "key.pem"
+
+            if not cert_path.exists() or not key_path.exists():
+                print("[UI] 🔐 Generating Ephemeral Self-Signed SSL Certificate for Mobile WebRTC...")
+                key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+                subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, u"JARVIS Localhost")])
+                cert = x509.CertificateBuilder().subject_name(
+                    subject
+                ).issuer_name(
+                    issuer
+                ).public_key(
+                    key.public_key()
+                ).serial_number(
+                    x509.random_serial_number()
+                ).not_valid_before(
+                    datetime.datetime.utcnow() - datetime.timedelta(days=1)
+                ).not_valid_after(
+                    datetime.datetime.utcnow() + datetime.timedelta(days=365)
+                ).add_extension(
+                    x509.SubjectAlternativeName([x509.DNSName(u"localhost")]),
+                    critical=False,
+                ).sign(key, hashes.SHA256())
+
+                os.makedirs(CONFIG_DIR, exist_ok=True)
+                with open(key_path, "wb") as f:
+                    f.write(key.private_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PrivateFormat.TraditionalOpenSSL,
+                        encryption_algorithm=serialization.NoEncryption(),
+                    ))
+                with open(cert_path, "wb") as f:
+                    f.write(cert.public_bytes(serialization.Encoding.PEM))
+
+            ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            ssl_context.load_cert_chain(str(cert_path), str(key_path))
+            return ssl_context
+        except Exception as e:
+            print(f"[UI] ⚠️ Failed to generate SSL Certificate. HTTPS will be disabled. Error: {e}")
+            return None
+
+    @web.middleware
+    async def _security_middleware(self, req, handler):
+        port = req.url.port
+        if port == PORT:
+            if req.remote not in ("127.0.0.1", "::1"):
+                return web.Response(status=403, text="403 Forbidden")
+        elif port == PORT + 1:
+            user_agent = req.headers.get("User-Agent", "").lower()
+            is_mobile = any(x in user_agent for x in ["android", "iphone", "ipad", "ipod", "webos", "blackberry", "iemobile", "opera mini"])
+            if not is_mobile:
+                return web.Response(status=403, text="403 Forbidden: Mobile Slot Exclusive.")
+            if req.path == "/" and getattr(self, 'mobile_connected', False):
+                if req.remote != getattr(self, '_mobile_ip', None):
+                    return web.Response(status=403, text="403 Forbidden: Slot Occupied.")
+        return await handler(req)
+
     async def _serve(self):
-        app = web.Application()
+        app = web.Application(middlewares=[self._security_middleware])
         app.router.add_get("/ws", self._ws_handler)
         app.router.add_get("/", self._index)
         app.router.add_static("/static", str(STATIC_DIR), show_index=False)
 
+        self.mobile_mic_queue = asyncio.Queue()
+        self.mobile_out_queue = asyncio.Queue()
+
         runner = web.AppRunner(app)
         await runner.setup()
+        
+        # 1. Desktop Interface binds strictly to Local HTTP
         await web.TCPSite(runner, "127.0.0.1", PORT).start()
-        print(f"[UI] Server on http://127.0.0.1:{PORT}")
+        
+        # 2. Mobile Interface attempts binding to HTTPS
+        ssl_ctx = self._generate_ssl_context()
+        MOBILE_PORT = PORT + 1
+        try:
+            if ssl_ctx:
+                await web.TCPSite(runner, "0.0.0.0", MOBILE_PORT, ssl_context=ssl_ctx).start()
+            else:
+                await web.TCPSite(runner, "0.0.0.0", MOBILE_PORT).start() # fallback
+        except Exception as e:
+            print(f"[UI] ⚠️ Failed to bind Mobile Port {MOBILE_PORT}: {e}")
+        
+        local_ips = set()
+        try:
+            import socket
+            # Method 1: Get all IPs assigned to the local host
+            hostname = socket.gethostname()
+            for info in socket.getaddrinfo(hostname, None):
+                ip = info[4][0]
+                if "." in ip and not ip.startswith("127.") and not ip.startswith("169.254."):
+                    local_ips.add(ip)
+            # Method 2: Default route
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ips.add(s.getsockname()[0])
+            s.close()
+        except Exception:
+            pass
+
+        # Prioritize standard home network prefixes over VPN/CGNAT
+        lan_ips = [ip for ip in local_ips if ip.startswith(("192.168.", "10.", "172."))]
+        best_ips = lan_ips if lan_ips else (list(local_ips) or ["127.0.0.1"])
+        
+        proto_str = "https" if ssl_ctx else "http"
+        ip_display = " or ".join([f"{proto_str}://{ip}:{MOBILE_PORT}" for ip in best_ips])
+            
+        print(f"[UI] Desktop Core running on http://127.0.0.1:{PORT}")
+        print(f"[UI] 📱 Mobile Assistant slot open! Connect your phone to: {ip_display}")
         self._server_ready.set()
+
+        async def _mobile_audio_sender():
+            while True:
+                chunk = await self.mobile_out_queue.get()
+                if self._mobile_ws is not None and not self._mobile_ws.closed:
+                    try:
+                        await self._mobile_ws.send_bytes(chunk)
+                    except Exception:
+                        pass
+
+        self._loop.create_task(_mobile_audio_sender())
 
         # WS fallback state push (for browser mode)
         while True:
@@ -426,6 +557,7 @@ class JarvisUI:
                     "conn_state":   self.conn_state,
                     "status_text":  self.status_text,
                     "is_building":  self.is_building,
+                    "mobile_connected": self.mobile_connected,
                 })
             await asyncio.sleep(1 / 30)
 
@@ -433,8 +565,35 @@ class JarvisUI:
         return web.FileResponse(STATIC_DIR / "index.html")
 
     async def _ws_handler(self, req):
+        device_type = req.query.get("device", "desktop")
+
+        if device_type == "mobile":
+            if self._mobile_ws is not None and req.remote != getattr(self, '_mobile_ip', None):
+                return web.Response(status=409, text="Mobile slot already full.")
+        else:
+            if self._desktop_ws is not None:
+                return web.Response(status=409, text="Desktop slot already full.")
+
         ws = web.WebSocketResponse()
         await ws.prepare(req)
+
+        if device_type == "mobile":
+            self._mobile_ws = ws
+            self._mobile_ip = req.remote
+            self.mobile_connected = True
+            self.mobile_locked = True
+            print("[UI] 📱 Mobile device connected and took control.")
+            while not self.mobile_mic_queue.empty():
+                try: self.mobile_mic_queue.get_nowait()
+                except asyncio.QueueEmpty: break
+            while not self.mobile_out_queue.empty():
+                try: self.mobile_out_queue.get_nowait()
+                except asyncio.QueueEmpty: break
+        else:
+            self._desktop_ws = ws
+            self.mobile_locked = False
+            print("[UI] 💻 Desktop UI connected.")
+
         self._ws_clients.append(ws)
 
         # Send current state + logs immediately
@@ -446,8 +605,12 @@ class JarvisUI:
             "conn_state": self.conn_state,
             "status_text": self.status_text,
             "is_building": self.is_building,
+            "mobile_connected": self.mobile_connected,
         })
-        await ws.send_json({"type": "setup_required", "has_key": self._api_key_ready})
+        if not (self._api_key_ready and self._language_ready):
+            await ws.send_json({"type": "setup_required", "has_key": self._api_key_ready})
+        else:
+            await ws.send_json({"type": "setup_ok"})
 
         for entry in list(self._log_queue):
             await ws.send_json({"type": "log", **entry})
@@ -460,9 +623,20 @@ class JarvisUI:
                         await self._handle_ws(ws, d)
                     except Exception:
                         pass
+                elif msg.type == web.WSMsgType.BINARY and device_type == "mobile":
+                    self.mobile_mic_queue.put_nowait(msg.data)
         finally:
             try: self._ws_clients.remove(ws)
             except ValueError: pass
+
+            if device_type == "mobile":
+                self._mobile_ws = None
+                self.mobile_connected = False
+                print("[UI] 📱 Mobile device disconnected. Control returned to laptop.")
+            else:
+                self._desktop_ws = None
+                print("[UI] 💻 Desktop UI disconnected.")
+
         return ws
 
     async def _handle_ws(self, ws, d):
@@ -644,7 +818,14 @@ Comment=Jarvis AI Assistant
                 threading.Timer(0.5, lambda: os._exit(0)).start()
             except Exception: pass
             
+        def _on_restored():
+            if self.is_sleeping:
+                self.wake_up(manual_restore=True)
+
         self._window.events.closed += _on_closed
+        self._window.events.restored += _on_restored
+        self._window.events.maximized += _on_restored
+        self._window.events.shown += _on_restored
         
         webview.start(func=self._push_state_loop, debug=False)
         os._exit(0)

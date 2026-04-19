@@ -326,25 +326,18 @@ def create_plan(goal: str, context: str = "") -> dict:
 
     except json.JSONDecodeError as e:
         print(f"[Planner] ⚠️ JSON parse failed: {e}")
-        return _fallback_plan(goal)
+        return _fallback_plan(goal, str(e))
     except Exception as e:
         print(f"[Planner] ⚠️ Planning failed: {e}")
-        return _fallback_plan(goal)
+        return _fallback_plan(goal, str(e))
 
 
-def _fallback_plan(goal: str) -> dict:
-    print("[Planner] 🔄 Fallback plan")
+def _fallback_plan(goal: str, error_msg: str = "") -> dict:
+    print(f"[Planner] 🚫 Planning failed. ({error_msg})")
     return {
         "goal": goal,
-        "steps": [
-            {
-                "step": 1,
-                "tool": "web_search",
-                "description": f"Search for: {goal}",
-                "parameters": {"query": goal},
-                "critical": True
-            }
-        ]
+        "steps": [],
+        "error": error_msg
     }
 
 
@@ -381,4 +374,4 @@ Create a REVISED plan for the remaining work only. Do not repeat completed steps
         return plan
     except Exception as e:
         print(f"[Planner] ⚠️ Replan failed: {e}")
-        return _fallback_plan(goal)
+        return _fallback_plan(goal, str(e))

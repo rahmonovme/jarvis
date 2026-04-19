@@ -80,6 +80,12 @@ from actions.dev_agent        import dev_agent
 from actions.web_search       import web_search as web_search_action
 from actions.computer_control import computer_control
 
+
+class _SleepInterrupt(Exception):
+    """Raised by _sleep_watcher to break the active session for sleep mode."""
+    pass
+
+
 def get_bundle_dir():
     if getattr(sys, "frozen", False):
         return Path(sys._MEIPASS)
@@ -551,12 +557,21 @@ class JarvisLive:
         self._bg_tasks_active   = 0     # Track background agent_task count
 
     def speak(self, text: str):
-        """Thread-safe speak — any thread can call this."""
+        """Thread-safe bare-metal speak — forces AI to relay system notifications aloud."""
         if not self._loop or not self.session:
             return
+            
+        directive = (
+            f"[SYSTEM NOTIFICATION]\n"
+            f"Relay the following message aloud to the user immediately, "
+            f"translating it to {self.ui.spoken_language} if necessary. "
+            f"Do not add any other commentary or ask questions. Message:\n"
+            f"\"{text}\""
+        )
+        
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
-                turns={"parts": [{"text": text}]},
+                turns={"parts": [{"text": directive}]},
                 turn_complete=True
             ),
             self._loop
@@ -785,8 +800,13 @@ class JarvisLive:
 
     async def _send_realtime(self):
         while True:
-            msg = await self.out_queue.get()
-            await self.session.send_realtime_input(media=msg)
+            if self.ui.is_sleeping:
+                return
+            try:
+                msg = await asyncio.wait_for(self.out_queue.get(), timeout=0.5)
+                await self.session.send_realtime_input(media=msg)
+            except asyncio.TimeoutError:
+                continue
 
     async def _listen_audio(self):
         print("[JARVIS] 🎤 Mic started")
@@ -801,9 +821,19 @@ class JarvisLive:
         silence_frames = 0
         try:
             while True:
-                data = await asyncio.to_thread(
-                    stream.read, CHUNK_SIZE, exception_on_overflow=False
-                )
+                if self.ui.is_sleeping:
+                    print("[JARVIS] 🎤 Mic stopped (sleep)")
+                    return
+                
+                if self.ui.mobile_connected:
+                    try:
+                        data = await asyncio.wait_for(self.ui.mobile_mic_queue.get(), timeout=0.1)
+                    except asyncio.TimeoutError:
+                        continue
+                else:
+                    data = await asyncio.to_thread(
+                        stream.read, CHUNK_SIZE, exception_on_overflow=False
+                    )
                 
                 rms = 0.0
                 
@@ -820,6 +850,11 @@ class JarvisLive:
                         if n > 0:
                             samples = struct.unpack(f'<{n}h', data)
                             rms = (sum(s * s for s in samples) / n) ** 0.5 / 32768.0
+                            
+                            # Implacable Active Noise Gate (Aggressively filters ambient music and static)
+                            if rms < 0.015:
+                                data = b'\x00' * len(data)
+                                
                             self.ui.mic_level = min(1.0, rms * 5.0)
                     except Exception:
                         pass
@@ -848,6 +883,9 @@ class JarvisLive:
 
         try:
             while True:
+                if self.ui.is_sleeping:
+                    print("[JARVIS] 👂 Recv stopped (sleep)")
+                    return
                 turn = self.session.receive()
                 async for response in turn:
 
@@ -919,6 +957,9 @@ class JarvisLive:
         )
         try:
             while True:
+                if self.ui.is_sleeping:
+                    print("[JARVIS] 🔊 Play stopped (sleep)")
+                    return
                 try:
                     chunk = await asyncio.wait_for(
                         self.audio_in_queue.get(), timeout=0.3
@@ -946,7 +987,12 @@ class JarvisLive:
                         self.ui.jarvis_level = min(1.0, rms * 5.0)
                 except Exception:
                     pass
-                await asyncio.to_thread(stream.write, chunk)
+                
+                if self.ui.mobile_connected:
+                    self.ui.mobile_out_queue.put_nowait(chunk)
+                else:
+                    if not getattr(self.ui, 'mobile_locked', False):
+                        await asyncio.to_thread(stream.write, chunk)
         except Exception as e:
             print(f"[JARVIS] ❌ Play error: {e}")
             raise
@@ -963,24 +1009,18 @@ class JarvisLive:
         max_backoff = 60
         consecutive_failures = 0
 
-        # Register wake callback so UI can signal us
-        self._wake_event = asyncio.Event()
-
-        def _on_wake():
-            """Called from UI thread when wake word detected."""
-            if self._loop:
-                self._loop.call_soon_threadsafe(self._wake_event.set)
-
-        self.ui._wake_callback = _on_wake
+        # Threading event — set by wake_up(), waited by sleep gate
+        self._woken = threading.Event()
+        self.ui._woken_event = self._woken
 
         while True:
-            # ── SLEEP GATE: if sleeping, wait for wake ──
+            # ── SLEEP GATE: if sleeping, block until woken ──
             if self.ui.is_sleeping:
                 print("[JARVIS] 😴 Session sleeping — starting wake listener...")
+                self._woken.clear()
                 self._start_wake_listener()
-                # Block async loop until wake
-                self._wake_event.clear()
-                await self._wake_event.wait()
+                # Block in a thread-safe way (doesn't depend on asyncio loop health)
+                await asyncio.to_thread(self._woken.wait)
                 print("[JARVIS] ☀️ Wake signal received — reconnecting...")
                 continue
 
@@ -1004,27 +1044,42 @@ class JarvisLive:
                     print("[JARVIS] ✅ Connected.")
                     self.ui.write_log("SYS: JARVIS online.")
 
-                    # Run until session ends or sleep is triggered
+                    # Tasks check ui.is_sleeping and return gracefully.
+                    # _receive_audio may block on async-for, so we use
+                    # FIRST_COMPLETED to detect when a sleep-aware task exits,
+                    # then cancel the stuck one.
                     tasks = [
                         asyncio.create_task(self._send_realtime()),
                         asyncio.create_task(self._listen_audio()),
                         asyncio.create_task(self._receive_audio()),
                         asyncio.create_task(self._play_audio()),
-                        asyncio.create_task(self._sleep_watcher()),
                     ]
                     done, pending = await asyncio.wait(
-                        tasks, return_when=asyncio.FIRST_EXCEPTION
+                        tasks, return_when=asyncio.FIRST_COMPLETED
                     )
+                    # Cancel remaining tasks with a short timeout
                     for t in pending:
                         t.cancel()
-                    # Check if sleep was triggered
-                    if self.ui.is_sleeping:
-                        print("[JARVIS] 😴 Sleep triggered — disconnecting session...")
-                        continue
-                    # Re-raise any real exceptions
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(*pending, return_exceptions=True),
+                            timeout=2.0
+                        )
+                    except asyncio.TimeoutError:
+                        print("[JARVIS] ⚠️ Force-cancelled stuck tasks")
+                    # Re-raise if any finished task had a real error
                     for t in done:
-                        if t.exception():
-                            raise t.exception()
+                        try:
+                            exc = t.exception()
+                        except asyncio.CancelledError:
+                            exc = None
+                        if exc:
+                            raise exc
+
+                # If we exited the session because of sleep, skip error handling
+                if self.ui.is_sleeping:
+                    print("[JARVIS] 😴 Session disconnected for sleep.")
+                    continue
 
             except Exception as e:
                 consecutive_failures += 1
@@ -1051,13 +1106,6 @@ class JarvisLive:
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, max_backoff)
 
-    async def _sleep_watcher(self):
-        """Polls for sleep event — cancels session when sleep is triggered."""
-        while True:
-            await asyncio.sleep(0.3)
-            if self.ui.is_sleeping:
-                raise asyncio.CancelledError("Sleep triggered")
-
     def _start_wake_listener(self):
         """Start a background thread that listens for 'wake up' using speech_recognition."""
         threading.Thread(
@@ -1073,42 +1121,82 @@ class JarvisLive:
         except ImportError:
             print("[WAKE] ⚠️ speech_recognition not installed. Cannot listen for wake word.")
             print("[WAKE] Install with: pip install SpeechRecognition")
-            # Fallback: just wait indefinitely (user must restart manually)
             return
 
+        class MobileAudioSource(sr.AudioSource):
+            def __init__(self, queue):
+                self.queue = queue
+                self.SAMPLE_RATE = 16000
+                self.SAMPLE_WIDTH = 2
+                self.CHUNK = 1024
+                self.stream = None
+            def __enter__(self):
+                class Stream:
+                    def __init__(self, q):
+                        self.q = q
+                        self._buf = b""
+                    def read(self, size):
+                        data = b""
+                        while len(data) < size:
+                            if not self._buf:
+                                try:
+                                    self._buf = self.q.get(timeout=0.1)
+                                except Exception:
+                                    break
+                            take = size - len(data)
+                            data += self._buf[:take]
+                            self._buf = self._buf[take:]
+                        return data if data else b'\x00' * size
+                self.stream = Stream(self.queue)
+                return self
+            def __exit__(self, *args):
+                self.stream = None
+
         recognizer = sr.Recognizer()
-        recognizer.energy_threshold = 300
+        recognizer.energy_threshold = 800
         recognizer.dynamic_energy_threshold = True
-        recognizer.pause_threshold = 0.8
+        recognizer.dynamic_energy_adjustment_damping = 0.15
+        recognizer.dynamic_energy_ratio = 1.6
+        recognizer.pause_threshold = 1.0
 
-        mic = sr.Microphone()
+        mic_desktop = sr.Microphone()
+
         print("[WAKE] 🎤 Wake listener active — say 'wake up' to resume...")
-
-        with mic as source:
-            recognizer.adjust_for_ambient_noise(source, duration=1)
 
         while self.ui.is_sleeping:
             try:
-                with mic as source:
-                    audio = recognizer.listen(source, timeout=5, phrase_time_limit=3)
+                # Seamlessly hot-swap the hardware layer based on connection context
+                active_source = MobileAudioSource(self.ui.mobile_mic_queue) if getattr(self.ui, 'mobile_connected', False) else mic_desktop
+                
+                with active_source as source:
+                    recognizer.adjust_for_ambient_noise(source, duration=0.2)
+                    audio = recognizer.listen(source, timeout=3, phrase_time_limit=4)
 
+                # Try recognition
+                text = None
                 try:
                     text = recognizer.recognize_google(audio, language="en-US").lower().strip()
+                except sr.UnknownValueError:
+                    print("[WAKE] 🔇 Heard speech but couldn't understand — keep listening")
+                    continue
+                except sr.RequestError as e:
+                    print(f"[WAKE] ⚠️ Google API error: {e} — retrying...")
+                    time.sleep(2)
+                    continue
+
+                if text:
                     print(f"[WAKE] 👂 Heard: '{text}'")
 
-                    # Check for wake phrase
-                    if "wake up" in text or "wake" in text.split():
+                    # Check for wake phrase (flexible matching)
+                    wake_words = ["wake up", "wake", "wakeup", "hey jarvis", "jarvis"]
+                    if any(w in text for w in wake_words):
                         print("[WAKE] ✅ Wake word detected!")
                         self.ui.wake_up()
                         return
-                except sr.UnknownValueError:
-                    pass  # Didn't understand — keep listening
-                except sr.RequestError as e:
-                    print(f"[WAKE] ⚠️ Speech API error: {e}")
-                    time.sleep(2)
 
             except sr.WaitTimeoutError:
-                pass  # No speech detected in timeout window — keep listening
+                # No speech for 8s — totally normal during sleep, keep listening
+                continue
             except Exception as e:
                 print(f"[WAKE] ⚠️ Listener error: {e}")
                 time.sleep(1)

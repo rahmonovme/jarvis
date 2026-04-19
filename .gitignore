@@ -11,10 +11,13 @@ venv/
 env/
 .env
 
-# API Keys & Secrets
-config/api_keys.json
-config/api_limits.json
+# Data & Configuration
+config/
 secrets.json
+
+# Generated SSL Certificates
+cert.pem
+key.pem
 
 # OS generated files
 .DS_Store

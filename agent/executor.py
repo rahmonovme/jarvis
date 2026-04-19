@@ -258,7 +258,15 @@ class AgentExecutor:
             steps = plan.get("steps", [])
 
             if not steps:
+                err = str(plan.get("error", ""))
                 msg = "I couldn't create a valid plan for this task, sir."
+                if "429" in err:
+                    msg = "I'm sorry sir, but your Google AI API quota has been exceeded."
+                elif "503" in err:
+                    msg = "I'm sorry sir, but the AI service is currently unavailable. Please try again later."
+                elif err:
+                    msg = "I couldn't create a plan due to a system error, sir."
+                    
                 if speak: speak(msg)
                 return msg
 

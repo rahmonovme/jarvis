@@ -29,6 +29,7 @@ const COL = {
 };
 
 /* ── State ── */
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 const S = {
   speaking: false, micLevel: 0, jarvisLevel: 0,
   connState: "CONNECTING", statusText: "INITIALISING",
@@ -81,6 +82,19 @@ window._onState = function(d) {
     if(cls1) cls1.style.display = "";
     if(cls2) cls2.style.display = "";
     window._is_building = false;
+  }
+
+  if (d.mobile_connected && !isMobile) {
+    if (!document.getElementById("mobile-overlay")) {
+      const overlay = document.createElement("div");
+      overlay.id = "mobile-overlay";
+      overlay.className = "mobile-controlling-overlay";
+      overlay.innerHTML = "<div class='mobile-badge'>📱 Mobile Control Active</div><p>Audio is routed to your mobile device.</p>";
+      document.body.appendChild(overlay);
+    }
+  } else {
+    const overlay = document.getElementById("mobile-overlay");
+    if (overlay) overlay.remove();
   }
 };
 const seenLogs = new Set();
@@ -453,13 +467,120 @@ function loop(ts) {
   requestAnimationFrame(loop);
 }
 
+/* ═══════ MOBILE WEB AUDIO PIPELINE ═══════ */
+let audioCtx = null, scriptProcessor = null, nextPlayTime = 0;
+async function initMobileAudio() {
+  if (!isMobile) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error("Local HTTP Context Security Blocked");
+  }
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)({sampleRate: 16000});
+  const micStream = await navigator.mediaDevices.getUserMedia({ 
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      sampleRate: 16000 
+    }, 
+    video: false 
+  });
+  const source = audioCtx.createMediaStreamSource(micStream);
+  scriptProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
+  
+  scriptProcessor.onaudioprocess = (e) => {
+    if (!ws || ws.readyState !== 1) return;
+    const inputData = e.inputBuffer.getChannelData(0);
+    const inputRate = audioCtx.sampleRate;
+    const outputRate = 16000;
+    
+    let pcm16;
+    if (inputRate === outputRate) {
+      pcm16 = new Int16Array(inputData.length);
+      for (let i = 0; i < inputData.length; i++) {
+        let s = Math.max(-1, Math.min(1, inputData[i]));
+        pcm16[i] =  s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+    } else {
+      // Hardware ignored constraint (iOS Safari). Fallback to inline Software Resampling.
+      const ratio = inputRate / outputRate;
+      const outLength = Math.round(inputData.length / ratio);
+      pcm16 = new Int16Array(outLength);
+      for (let i = 0; i < outLength; i++) {
+        const inIdx = i * ratio;
+        const idx1 = Math.floor(inIdx);
+        const idx2 = Math.min(idx1 + 1, inputData.length - 1);
+        const frac = inIdx - idx1;
+        let s = inputData[idx1] + (inputData[idx2] - inputData[idx1]) * frac;
+        s = Math.max(-1, Math.min(1, s));
+        pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+    }
+    ws.send(pcm16.buffer); // Send binary
+  };
+  source.connect(scriptProcessor);
+  scriptProcessor.connect(audioCtx.destination);
+}
+function playMobileAudio(arrayBuffer) {
+  if (!audioCtx) return;
+  const int16 = new Int16Array(arrayBuffer);
+  const float32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768.0;
+  
+  const audioBuffer = audioCtx.createBuffer(1, float32.length, 24000);
+  audioBuffer.getChannelData(0).set(float32);
+  const source = audioCtx.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(audioCtx.destination);
+  
+  const currentTime = audioCtx.currentTime;
+  if (nextPlayTime < currentTime) nextPlayTime = currentTime;
+  source.start(nextPlayTime);
+  nextPlayTime += audioBuffer.duration;
+}
+
+if (isMobile) {
+  const btn = document.createElement("button");
+  btn.id = "mobile-auth-btn";
+  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:32px;height:32px;margin-bottom:12px;"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg><br/>TAP TO CONNECT MICROPHONE`;
+  btn.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:100000;background:rgba(6,6,15,0.9);color:#22d3ee;border:none;font-family:monospace;font-size:18px;letter-spacing:2px;cursor:pointer;backdrop-filter:blur(10px);display:flex;flex-direction:column;align-items:center;justify-content:center;";
+  btn.onclick = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      btn.innerHTML = `<div style="text-align:center;padding:24px;display:flex;flex-direction:column;gap:12px;align-items:center;">
+        <span style="color:#ef4444;font-size:18px;font-weight:bold;">SECURE CONTEXT REQUIRED</span>
+        <span style="font-size:13px;color:#a1a1aa;line-height:1.5;">Your browser is blocking microphone access because this connection is not over HTTPS.<br/><br/>Please ensure you connected using the <b>https://</b> link provided in the JARVIS terminal logs, and bypass the self-signed warning.</span>
+      </div>`;
+      return;
+    }
+    btn.innerHTML = "CONNECTING...";
+    try {
+      await initMobileAudio();
+      setTimeout(() => { if(audioCtx && audioCtx.state !== "suspended") btn.remove(); }, 500);
+    } catch(e) {
+      btn.innerHTML = `<div style="padding:20px;text-align:center;color:#ef4444;"><b>Connection Error</b><br/><br/><span style="font-size:12px;">${e.message}</span></div>`;
+    }
+  };
+  document.body.appendChild(btn);
+}
+
 /* ═══════ WEBSOCKET (browser fallback) ═══════ */
 let ws = null, wsTimer = null;
 function wsConnect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  try { ws = new WebSocket(`${proto}://${location.host}/ws`); } catch { wsRetry(); return; }
+  const device = isMobile ? "mobile" : "desktop";
+  if (isMobile) {
+    const btnSettings = document.getElementById("btn-settings");
+    if (btnSettings) btnSettings.style.display = "none";
+  }
+  try { ws = new WebSocket(`${proto}://${location.host}/ws?device=${device}`); } catch { wsRetry(); return; }
   ws.onopen = () => {};
-  ws.onmessage = e => {
+  ws.onmessage = async (e) => {
+    if (e.data instanceof window.Blob) {
+      if (isMobile) {
+        const arrayBuffer = await e.data.arrayBuffer();
+        playMobileAudio(arrayBuffer);
+      }
+      return;
+    }
     try {
       const d = JSON.parse(e.data);
       if (d.type === "state") window._onState(d);

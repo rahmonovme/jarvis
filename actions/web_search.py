@@ -57,7 +57,7 @@ def _ddg_search(query: str, max_results: int = 6) -> list:
 
 def _format_ddg(query: str, results: list) -> str:
     if not results:
-        return f"No results found for: {query}"
+        raise ValueError(f"No results found for: {query}")
     lines = [f"Search results for: {query}\n"]
     for i, r in enumerate(results, 1):
         if r.get("title"):   lines.append(f"{i}. {r['title']}")

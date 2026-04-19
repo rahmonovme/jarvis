@@ -147,7 +147,13 @@ If your machine does not already have Python installed, you must install the bar
    python3 main.py
    ```
 
-On first launch, a setup wizard will prompt you for your Gemini API key.
+## 📱 Cross-Device Mobile Architecture
+JARVIS features a natively engineered, highly secure Mobile Handoff protocol, allowing you to seamlessly control your Desktop base-station from your iOS or Android smartphone over your local Wi-Fi network.
+
+* **Dual-Bind Security:** JARVIS establishes two separate Application servers. The primary Host interface strictly locks to `127.0.0.1:5050` (Localhost TCP), fundamentally neutralizing remote Desktop vulnerabilities. 
+* **Native HTTPS Tunnel:** The Mobile Assistant Mode dynamically auto-generates ephemeral Self-Signed SSL Certificates (`cryptography`), forcefully upgrading your remote connection to an active `https://` proxy on Port `5051`. This categorically bypasses Apple iOS Safari's local-network WebRTC blocks, granting you native, flag-free hardware Microphone functionality right on your iPhone or iPad!
+* **Seamless Hardware Handoff:** Whenever your phone connects, the laptop's speakers are electronically locked out (`mobile_locked`). Audio and text simultaneously sync to the mobile buffer. If your phone battery dies or the screen locks, JARVIS detects the socket break within 3 seconds, instantly routes audio back to your laptop, and physically swaps the Wake-Listener to the host desktop microphone without dropping the session!
+* **Active Hardware Noise Gating:** A powerful `speech_recognition` Linear Interpolation framework mathematical strips 48kHz mobile audio to pure 16kHz for Gemini, while aggressively gating active ambient static, distant traffic, and low-volume room music dynamically *before* hitting the cloud.
 
 ---
 
